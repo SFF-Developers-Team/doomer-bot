@@ -5,8 +5,10 @@ import time
 import struct
 from bytereader import ByteReader
 from huffman import Huffman
-from discord import app_commands
+from discord import *
 from dotenv import load_dotenv
+import asyncio
+import schedule
 
 load_dotenv()
 
@@ -15,7 +17,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 SERVER_IP = str(os.getenv('DOOM_SERVER_IP'))
 SERVER_PORT = int(os.getenv('DOOM_SERVER_PORT'))
 MY_GUILD_ID = int(os.getenv('DEBUG_MY_GUILD_ID'))
-
+SERVER_INFO_CHANNEL = int(os.getenv('DEBUG_MY_GUILD_ID'))
 # SQF flags
 SQF_NAME                = 0x00000001
 SQF_URL                 = 0x00000002
@@ -56,6 +58,10 @@ SERVER_LAUNCHER_IGNORING            = 5660024
 SERVER_LAUNCHER_BANNED              = 5660025
 SERVER_LAUNCHER_CHALLENGE_SEGMENTED = 5660032
 
+# Gamemodes (0-15), check https://wiki.zandronum.com/Launcher_protocol#Game_modes 
+gamemodes = [ 'Cooperative', 'Survival', 'Invasion', 'Deathmatch', 'TeamPlay', 'Duel', 'Terminator', 'LastManStanding', 'TeamLMS', 'Possession', 
+             'TeamPossession', 'TeamGame', 'CTF', 'OneFlagCTF', 'SkullTag', 'Domintation']
+
 # Bot initialization
 intents = discord.Intents.default()
 intents.message_content = True
@@ -68,20 +74,26 @@ guild = discord.Object(id=MY_GUILD_ID)
 @client.event
 async def on_ready():
     await tree.sync(guild=guild)
-    print('Готов к труду и обороне!')
+    print('Bot started')
 
 @tree.command(name = 'ping', description = 'Just for test', guild=guild)
 async def ping(ctx):
     await ctx.response.send_message("Pong!")
-
-@tree.command(name = 'serverinfo', description = 'Get doom server info', guild=guild)
-async def serverinfo(ctx):
+        
+async def updateinfo():
+    schedule.every(5).seconds.do(serverinfo)
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+        
+async def serverinfo():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(2)
+    channel = client.get_channel(SERVER_INFO_CHANNEL)       
 
     try:
         challenge = struct.pack("<l", 199)
-        flags = struct.pack("<l", SQF_MAPNAME | SQF_MAXPLAYERS | SQF_NUMPLAYERS)
+        flags = struct.pack("<l", SQF_NAME | SQF_MAPNAME | SQF_MAXPLAYERS | SQF_PWADS | SQF_GAMETYPE | SQF_IWAD | SQF_NUMPLAYERS )
         cur_time = struct.pack("<l", int(time.time()))
 
         sock.sendto(Huffman.encode(challenge + flags + cur_time), (SERVER_IP, SERVER_PORT))
@@ -92,26 +104,54 @@ async def serverinfo(ctx):
 
         if status != SERVER_LAUNCHER_CHALLENGE:
             pass 
-
+        
+        # Reading info from packets, check https://wiki.zandronum.com/Launcher_protocol#Packet_contents
         send_time = data.read_long()
         version = data.read_string()
         flags = data.read_long()
 
+        servername = data.read_string()
         mapname = data.read_string()
         maxplayers = data.read_byte()
+        pwadsnum = data.read_byte()
+        pwads = ""
+        for i in range(pwadsnum):
+            # Creating string with pwads
+            pwads += data.read_string()
+            if i >= 0 and i != pwadsnum - 1:
+                pwads += (", ")
+        gametype = data.read_byte()
+        gametypeinsta = data.read_byte()
+        gametypebuckshot = data.read_byte()
+        iwads = data.read_string()
         numplayers = data.read_byte()
-
-        await ctx.response.send_message(f'Map: {mapname}\nPlayers: {numplayers}/{maxplayers}')
-
+        
+        # Creating embeded and sending it
+        embed = discord.Embed(url="", title=f'{servername} Info', colour=discord.Colour.brand_red())
+        embed.add_field(name=f'Address: {SERVER_IP}:{SERVER_PORT}', value="", inline=False)
+        embed.add_field(name=f'Players: {numplayers}/{maxplayers}', value="", inline=False)
+        embed.add_field(name=f'Mapname: {mapname}', value="", inline=False)
+        embed.add_field(name=f'IWADs: {iwads}', value="", inline=False)
+        embed.add_field(name=f'PWADs: {pwads}', value="", inline=False)
+        embed.add_field(name=f'Game Type: {gamemodes[gametype]}', value="")
+        print(version)
+        if os.path.isfile("serverinfo.txt"):
+            idfile = open("serverinfo.txt")
+            id = idfile.read()
+            msg = channel.get_partial_message(id)
+            await msg.edit(embed=embed)
+        else:
+            idfile = open("serverinfo.txt", "x") 
+            msg = await channel.send(embed=embed)
+            idfile.write(str(msg.id))
+        print(msg.id)
     except Exception as e:
+
         print(f'/serverinfo error: {e}')
-        await ctx.response.send_message("Sorry I am broken :(")
+        await channel.send("Sorry i am broken :(")
 
     finally:
         sock.close()
-
 if __name__ == '__main__':
-    try:
-        client.run(TOKEN)
-    except discord.LoginFailure:
-        print('Failed to login! Please check your .env file')
+    # TODO: Make update info about server every n minute
+    client.run(token=TOKEN)
