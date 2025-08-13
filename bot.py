@@ -17,7 +17,8 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 SERVER_IP = str(os.getenv('DOOM_SERVER_IP'))
 SERVER_PORT = int(os.getenv('DOOM_SERVER_PORT'))
 MY_GUILD_ID = int(os.getenv('DEBUG_MY_GUILD_ID'))
-SERVER_INFO_CHANNEL = int(os.getenv('DEBUG_MY_GUILD_ID'))
+SERVER_INFO_CHANNEL = int(os.getenv('SERVER_INFO_CHANNEL'))
+
 # SQF flags
 SQF_NAME                = 0x00000001
 SQF_URL                 = 0x00000002
@@ -74,22 +75,22 @@ guild = discord.Object(id=MY_GUILD_ID)
 @client.event
 async def on_ready():
     await tree.sync(guild=guild)
+    await serverinfo()
     print('Bot started')
 
 @tree.command(name = 'ping', description = 'Just for test', guild=guild)
 async def ping(ctx):
     await ctx.response.send_message("Pong!")
-        
+    
 async def updateinfo():
     schedule.every(5).seconds.do(serverinfo)
     while True:
         schedule.run_pending()
         time.sleep(1)
-        
+    
 async def serverinfo():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(2)
-    channel = client.get_channel(SERVER_INFO_CHANNEL)       
 
     try:
         challenge = struct.pack("<l", 199)
@@ -109,7 +110,14 @@ async def serverinfo():
         send_time = data.read_long()
         version = data.read_string()
         flags = data.read_long()
-
+        versionZand = ""
+        i = 0
+        # Version <1.0 not working, but why u used it?
+        # Also i think it method sucks, pls rewrite it if this really bad
+        while version[i] == "3" or version[i] == "2" or version[i] == "1" or version[i] == "0" or version[i] == ".": 
+            print(version[i])
+            versionZand += version[i]
+            i += 1
         servername = data.read_string()
         mapname = data.read_string()
         maxplayers = data.read_byte()
@@ -133,14 +141,21 @@ async def serverinfo():
         embed.add_field(name=f'Mapname: {mapname}', value="", inline=False)
         embed.add_field(name=f'IWADs: {iwads}', value="", inline=False)
         embed.add_field(name=f'PWADs: {pwads}', value="", inline=False)
-        embed.add_field(name=f'Game Type: {gamemodes[gametype]}', value="")
+        embed.add_field(name=f'Game Type: {gamemodes[gametype]}', value="", inline=False)
+        embed.add_field(name=f'-# Zandronum version: {versionZand}', value="")
+        
+        await client.change_presence(status=discord.Status.online, activity=discord.Activity(name=f"{servername} with {numplayers} players online", type=discord.ActivityType.playing))
         print(version)
         if os.path.isfile("serverinfo.txt"):
+            channel = client.get_channel(SERVER_INFO_CHANNEL)       
+            # Getting id of message with serverinfo
             idfile = open("serverinfo.txt")
             id = idfile.read()
             msg = channel.get_partial_message(id)
             await msg.edit(embed=embed)
         else:
+            # If it doesnt exists, we creating new message and write id in a file
+            channel = client.get_channel(SERVER_INFO_CHANNEL)       
             idfile = open("serverinfo.txt", "x") 
             msg = await channel.send(embed=embed)
             idfile.write(str(msg.id))
