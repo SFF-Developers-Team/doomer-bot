@@ -71,102 +71,110 @@ client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 guild = discord.Object(id=MY_GUILD_ID)
-
+        
 @client.event
 async def on_ready():
     await tree.sync(guild=guild)
-    await serverinfo()
     print('Bot started')
 
 @tree.command(name = 'ping', description = 'Just for test', guild=guild)
 async def ping(ctx):
     await ctx.response.send_message("Pong!")
     
-async def updateinfo():
-    schedule.every(5).seconds.do(serverinfo)
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
-    
 async def serverinfo():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2)
+    # Starting big loop
+    while True:
+        # Printing ready of client
+        print(client.is_ready())
+        await asyncio.sleep(3)
+        # When client is ready, we starting this loop
+        while client.is_ready():
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(2)
+            try:
+                print('goida')
 
-    try:
-        challenge = struct.pack("<l", 199)
-        flags = struct.pack("<l", SQF_NAME | SQF_MAPNAME | SQF_MAXPLAYERS | SQF_PWADS | SQF_GAMETYPE | SQF_IWAD | SQF_NUMPLAYERS )
-        cur_time = struct.pack("<l", int(time.time()))
+                challenge = struct.pack("<l", 199)
+                flags = struct.pack("<l", SQF_NAME | SQF_MAPNAME | SQF_MAXPLAYERS | SQF_PWADS | SQF_GAMETYPE | SQF_IWAD | SQF_NUMPLAYERS )
+                cur_time = struct.pack("<l", int(time.time()))
 
-        sock.sendto(Huffman.encode(challenge + flags + cur_time), (SERVER_IP, SERVER_PORT))
-        data, _ = sock.recvfrom(2048)
-        data = ByteReader(Huffman.decode(data))
+                sock.sendto(Huffman.encode(challenge + flags + cur_time), (SERVER_IP, SERVER_PORT))
+                data, _ = sock.recvfrom(4096)
 
-        status = data.read_long()
+                data = ByteReader(Huffman.decode(data))
 
-        if status != SERVER_LAUNCHER_CHALLENGE:
-            pass 
-        
-        # Reading info from packets, check https://wiki.zandronum.com/Launcher_protocol#Packet_contents
-        send_time = data.read_long()
-        version = data.read_string()
-        flags = data.read_long()
-        versionZand = ""
-        i = 0
-        # Version <1.0 not working, but why u used it?
-        # Also i think it method sucks, pls rewrite it if this really bad
-        while version[i] == "3" or version[i] == "2" or version[i] == "1" or version[i] == "0" or version[i] == ".": 
-            print(version[i])
-            versionZand += version[i]
-            i += 1
-        servername = data.read_string()
-        mapname = data.read_string()
-        maxplayers = data.read_byte()
-        pwadsnum = data.read_byte()
-        pwads = ""
-        for i in range(pwadsnum):
-            # Creating string with pwads
-            pwads += data.read_string()
-            if i >= 0 and i != pwadsnum - 1:
-                pwads += (", ")
-        gametype = data.read_byte()
-        gametypeinsta = data.read_byte()
-        gametypebuckshot = data.read_byte()
-        iwads = data.read_string()
-        numplayers = data.read_byte()
-        
-        # Creating embeded and sending it
-        embed = discord.Embed(url="", title=f'{servername} Info', colour=discord.Colour.brand_red())
-        embed.add_field(name=f'Address: {SERVER_IP}:{SERVER_PORT}', value="", inline=False)
-        embed.add_field(name=f'Players: {numplayers}/{maxplayers}', value="", inline=False)
-        embed.add_field(name=f'Mapname: {mapname}', value="", inline=False)
-        embed.add_field(name=f'IWADs: {iwads}', value="", inline=False)
-        embed.add_field(name=f'PWADs: {pwads}', value="", inline=False)
-        embed.add_field(name=f'Game Type: {gamemodes[gametype]}', value="", inline=False)
-        embed.set_footer(text = f'Zandronum version: {versionZand}')
-        
-        await client.change_presence(status=discord.Status.online, activity=discord.Activity(name=f"{servername} with {numplayers} players online", type=discord.ActivityType.playing))
-        print(version)
-        if os.path.isfile("serverinfo.txt"):
-            channel = client.get_channel(SERVER_INFO_CHANNEL)       
-            # Getting id of message with serverinfo
-            idfile = open("serverinfo.txt")
-            id = idfile.read()
-            msg = channel.get_partial_message(id)
-            await msg.edit(embed=embed)
-        else:
-            # If it doesnt exists, we creating new message and write id in a file
-            channel = client.get_channel(SERVER_INFO_CHANNEL)       
-            idfile = open("serverinfo.txt", "x") 
-            msg = await channel.send(embed=embed)
-            idfile.write(str(msg.id))
-        print(msg.id)
-    except Exception as e:
+                status = data.read_long()
+                print(status)
+                if status != SERVER_LAUNCHER_CHALLENGE:
+                    pass 
+                
+                # Reading info from packets, check https://wiki.zandronum.com/Launcher_protocol#Packet_contents
+                send_time = data.read_long()
+                version = data.read_string()
+                flags = data.read_long()
 
-        print(f'/serverinfo error: {e}')
-        await channel.send("Sorry i am broken :(")
+                versionZand = ""
+                i = 0
+                # Version <1.0 not working, but why u used it?
+                # Also i think it method sucks, pls rewrite it if this really bad
+                while version[i] == "3" or version[i] == "2" or version[i] == "1" or version[i] == "0" or version[i] == ".": 
+                    print(version[i])
+                    versionZand += version[i]
+                    i += 1
+                servername = data.read_string()
+                mapname = data.read_string()
+                maxplayers = data.read_byte()
+                pwadsnum = data.read_byte()
+                pwads = ""
+                for i in range(pwadsnum):
+                    # Creating string with pwads
+                    pwads += data.read_string()
+                    if i >= 0 and i != pwadsnum - 1:
+                        pwads += (", ")
+                gametype = data.read_byte()
+                gametypeinsta = data.read_byte()
+                gametypebuckshot = data.read_byte()
+                iwads = data.read_string()
+                numplayers = data.read_byte()
+                
+                # Creating embeded and sending it
+                embed = discord.Embed(url="", title=f'{servername} Info', colour=discord.Colour.brand_red())
+                embed.add_field(name=f'Address: {SERVER_IP}:{SERVER_PORT}', value="", inline=False)
+                embed.add_field(name=f'Players: {numplayers}/{maxplayers}', value="", inline=False)
+                embed.add_field(name=f'Mapname: {mapname}', value="", inline=False)
+                embed.add_field(name=f'IWADs: {iwads}', value="", inline=False)
+                embed.add_field(name=f'PWADs: {pwads}', value="", inline=False)
+                embed.add_field(name=f'Game Type: {gamemodes[gametype]}', value="", inline=False)
+                embed.set_footer(text = f'Zandronum version: {versionZand}')
+                
+                await client.change_presence(status=discord.Status.online, activity=discord.Activity(name=f"{servername} with {numplayers} players online", type=discord.ActivityType.playing))
+                if os.path.isfile("serverinfo.txt"):
+                    channel = client.get_channel(SERVER_INFO_CHANNEL)       
+                    # Getting id of message with serverinfo
+                    idfile = open("serverinfo.txt")
+                    id = idfile.read()
+                    msg = channel.get_partial_message(id)
+                    await msg.edit(embed=embed)
+                else:
+                    # If it doesnt exists, we creating new message and write id in a file
+                    channel = client.get_channel(SERVER_INFO_CHANNEL)       
+                    idfile = open("serverinfo.txt", "x") 
+                    msg = await channel.send(embed=embed)
+                    idfile.write(str(msg.id))
+                print(msg.id)
+            except Exception as e:
+                print(f'/serverinfo error: {e}')
 
-    finally:
-        sock.close()
+            finally:
+                sock.close()
+                print('Socked closed')
+            # Waiting 10 seconds
+            await asyncio.sleep(10)
+            # TODO: Do nothing when server info is same 
+            
+async def main():
+    await asyncio.gather(asyncio.create_task(client.start(token=TOKEN)), asyncio.create_task(serverinfo()))
 if __name__ == '__main__':
-    # TODO: Make update info about server every n minute
-    client.run(token=TOKEN)
+    asyncio.run(main())
+
+        
