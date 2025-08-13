@@ -142,7 +142,7 @@ async def serverinfo():
         embed.add_field(name=f'IWADs: {iwads}', value="", inline=False)
         embed.add_field(name=f'PWADs: {pwads}', value="", inline=False)
         embed.add_field(name=f'Game Type: {gamemodes[gametype]}', value="", inline=False)
-        embed.add_field(name=f'-# Zandronum version: {versionZand}', value="")
+        embed.set_footer(text = f'Zandronum version: {versionZand}')
         
         await client.change_presence(status=discord.Status.online, activity=discord.Activity(name=f"{servername} with {numplayers} players online", type=discord.ActivityType.playing))
         print(version)
