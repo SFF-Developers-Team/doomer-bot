@@ -63,11 +63,15 @@ async def update_info():
         try:
             message = await channel.fetch_message(message_id)
             await message.edit(embed=generate_info_embed())
+            await client.change_presence(activity=discord.Game(name=f'{DOOMSERVER.name} with {DOOMSERVER.numplayers} online'))
+
             return
         except discord.NotFound:
             pass
 
-    msg = await channel.send(embed=generate_info_embed())
+    msg = await channel.send(embed=generate_info_embed())    
+    await client.change_presence(activity=discord.Game(name=f'{DOOMSERVER.name} with {DOOMSERVER.numplayers} online'))
+
     CONFIG['info-message-id'] = msg.id
     save_config()
 
