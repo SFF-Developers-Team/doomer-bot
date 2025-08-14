@@ -1,4 +1,4 @@
-import os, json, discord
+import os, json, discord, datetime
 from discord import *
 from discord.ext import tasks
 from dotenv import load_dotenv
@@ -78,7 +78,7 @@ async def ping(ctx):
 def generate_info_embed():
     DOOMSERVER.update_info()
 
-    embed = discord.Embed(title=f'{DOOMSERVER.name} ({SERVER_IP}:{SERVER_PORT})', colour=discord.Colour.brand_red())
+    embed = discord.Embed(title=f'{DOOMSERVER.name} ({SERVER_IP}:{SERVER_PORT})', colour=discord.Colour.brand_red(), timestamp=datetime.datetime.now())
     embed.add_field(name=f'<:Doom_Normal:1404101891129868381> Players', value=f'{DOOMSERVER.numplayers}/{DOOMSERVER.maxplayers}')
     embed.add_field(name=f'Map', value=f'{DOOMSERVER.mapname}')
     embed.add_field(name=f'IWAD', value=f'{DOOMSERVER.iwad}')
