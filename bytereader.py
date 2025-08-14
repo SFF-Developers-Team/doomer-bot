@@ -5,20 +5,17 @@ class ByteReader:
     def __init__(self, data: bytes):
         self.buffer = io.BytesIO(data)
 
+    def read_bytes(self, size) -> bytes:
+        return self.buffer.read(size)
+
     def read_byte(self) -> int:
         return struct.unpack("<B", self.buffer.read(1))[0]
 
     def read_short(self) -> int:
         return struct.unpack("<h", self.buffer.read(2))[0]
-
-    def read_ushort(self) -> int:
-        return struct.unpack("<H", self.buffer.read(2))[0]
-
+    
     def read_long(self) -> int:
         return struct.unpack("<i", self.buffer.read(4))[0]
-
-    def read_ulong(self) -> int:
-        return struct.unpack("<I", self.buffer.read(4))[0]
 
     def read_float(self) -> float:
         return struct.unpack("<f", self.buffer.read(4))[0]
