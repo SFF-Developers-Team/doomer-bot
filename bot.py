@@ -50,7 +50,8 @@ async def on_ready():
 
 @tasks.loop(seconds=10)
 async def update_info():
-    await client.change_presence(activity=discord.Game(name=f'{DOOMSERVER.name} with {DOOMSERVER.numplayers} online'))
+    if DOOMSERVER.update_info():
+        await client.change_presence(activity=discord.Game(name=f'{DOOMSERVER.name} with {DOOMSERVER.numplayers} online'))
     
     channel_id = CONFIG['info-channel-id']
 
@@ -81,8 +82,6 @@ async def ping(ctx):
     await ctx.response.send_message("Pong!")
         
 def generate_info_embed():
-    DOOMSERVER.update_info()
-
     embed = discord.Embed(title=f'{DOOMSERVER.name} ({SERVER_IP}:{SERVER_PORT})', colour=discord.Colour.brand_red(), timestamp=datetime.datetime.now())
     embed.add_field(name=f'Players', value=f'<:Doom_Normal:1404101891129868381> {DOOMSERVER.numplayers}/{DOOMSERVER.maxplayers}')
     embed.add_field(name=f'Map', value=f'{DOOMSERVER.mapname}')
