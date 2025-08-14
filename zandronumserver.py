@@ -194,17 +194,19 @@ class ZandronumServer:
         raise ValueError(f'Unexpected server status ({status})! Remaining bytes: {data.remaining()}')
 
     def update_info(self, flags: ServerQueryFlags = 0xFFFFFFFF) -> ServerQueryFlags:
+        cur_time = int(time.time())
         request = b''
         request += struct.pack("<l", 199) # challenge
         request += struct.pack("<L", flags)
-        request += struct.pack("<l", int(time.time()))
+        request += struct.pack("<l", cur_time)
         
         try:
             self._send(request)
 
             res = self._recv(1024 * 8)
 
-            send_time = res.read_long()
+            send_time = res.read_ulong()
+
             self.version = res.read_string()
             res_flags = res.read_long()
 

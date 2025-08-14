@@ -50,6 +50,8 @@ async def on_ready():
 
 @tasks.loop(seconds=10)
 async def update_info():
+    await client.change_presence(activity=discord.Game(name=f'{DOOMSERVER.name} with {DOOMSERVER.numplayers} online'))
+    
     channel_id = CONFIG['info-channel-id']
 
     if not channel_id:
@@ -63,7 +65,6 @@ async def update_info():
         try:
             message = await channel.fetch_message(message_id)
             await message.edit(embed=generate_info_embed())
-            await client.change_presence(activity=discord.Game(name=f'{DOOMSERVER.name} with {DOOMSERVER.numplayers} online'))
 
             return
         except discord.NotFound:
@@ -83,9 +84,9 @@ def generate_info_embed():
     DOOMSERVER.update_info()
 
     embed = discord.Embed(title=f'{DOOMSERVER.name} ({SERVER_IP}:{SERVER_PORT})', colour=discord.Colour.brand_red(), timestamp=datetime.datetime.now())
-    embed.add_field(name=f'<:Doom_Normal:1404101891129868381> Players', value=f'{DOOMSERVER.numplayers}/{DOOMSERVER.maxplayers}')
+    embed.add_field(name=f'Players', value=f'<:Doom_Normal:1404101891129868381> {DOOMSERVER.numplayers}/{DOOMSERVER.maxplayers}')
     embed.add_field(name=f'Map', value=f'{DOOMSERVER.mapname}')
-    embed.add_field(name=f'IWAD', value=f'{DOOMSERVER.iwad}')
+    embed.add_field(name=f'IWAD', value=f'<:doom85:1404101878660202679> {DOOMSERVER.iwad}')
     embed.add_field(name=f'Mode', value=DOOMSERVER.gametype.name)
     embed.add_field(name=f'PWADs ({len(DOOMSERVER.pwads)})', value=', '.join(DOOMSERVER.pwads), inline=False)
 

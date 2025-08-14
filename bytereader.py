@@ -14,6 +14,9 @@ class ByteReader:
     def read_short(self) -> int:
         return struct.unpack("<h", self.buffer.read(2))[0]
     
+    def read_ulong(self) -> int:
+        return struct.unpack("<I", self.buffer.read(4))[0]
+
     def read_long(self) -> int:
         return struct.unpack("<i", self.buffer.read(4))[0]
 
