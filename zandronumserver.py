@@ -224,6 +224,7 @@ class ZandronumServer:
 
                 if len(segments) == seg_total:
                     res = b''.join(segments[i] for i in sorted(segments))
+                    break
                 
                 res, _ = self._sock.recvfrom(1024)
                 res = ByteReader(Huffman.decode(res))
