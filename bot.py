@@ -83,9 +83,9 @@ async def ping(ctx):
         
 def generate_info_embed():
     embed = discord.Embed(title=f'{DOOMSERVER.name} ({SERVER_IP}:{SERVER_PORT})', colour=discord.Colour.brand_red(), timestamp=datetime.datetime.now())
-    embed.add_field(name=f'Players', value=f'<:Doom_Normal:1404101891129868381> {DOOMSERVER.numplayers}/{DOOMSERVER.maxplayers}')
+    embed.add_field(name=f'Players', value=f'{DOOMSERVER.numplayers}/{DOOMSERVER.maxplayers}')
     embed.add_field(name=f'Map', value=f'{DOOMSERVER.mapname}')
-    embed.add_field(name=f'IWAD', value=f'<:doom85:1404101878660202679> {DOOMSERVER.iwad}')
+    embed.add_field(name=f'IWAD', value=f'{DOOMSERVER.iwad}')
     embed.add_field(name=f'Mode', value=DOOMSERVER.gametype.name)
     embed.add_field(name=f'PWADs ({len(DOOMSERVER.pwads)})', value=', '.join(DOOMSERVER.pwads), inline=False)
 

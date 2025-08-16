@@ -1,9 +1,15 @@
 import time
 import socket
 import struct
-from enum import Enum, IntFlag
+import hashlib
+from enum import IntEnum, IntFlag
 from huffman import Huffman
 from bytereader import ByteReader
+from dataclasses import dataclass, field
+from typing import Tuple
+
+
+RCON_PROTOCOL_VERSION = 4
 
 # https://wiki.zandronum.com/Launcher_protocol#Query_flags
 class ServerQueryFlags(IntFlag):
@@ -47,50 +53,85 @@ class ServerQueryFlags2(IntFlag):
     VOICECHAT          = 0x00000010
 
 # https://wiki.zandronum.com/Launcher_protocol#Challenge_packet
-SERVER_LAUNCHER_CHALLENGE           = 5660023
-SERVER_LAUNCHER_IGNORING            = 5660024
-SERVER_LAUNCHER_BANNED              = 5660025
-SERVER_LAUNCHER_CHALLENGE_SEGMENTED = 5660032
+class ServerLauncherResponse(IntEnum):
+    CHALLENGE           = 5660023
+    IGNORING            = 5660024
+    BANNED              = 5660025
+    CHALLENGE_SEGMENTED = 5660032
 
+# https://wiki.zandronum.com/RCon_protocol#Message_headers
+class RConServerHeaders(IntEnum):
+    OLDPROTOCOL         = 32
+    BANNED              = 33
+    SALT                = 34
+    LOGGEDIN            = 35
+    INVALIDPASSWORD     = 36
+    MESSAGE             = 37
+    UPDATE              = 38
+    TABCOMPLETE         = 39
+    TOOMANYTABCOMPLETES = 40
+
+class RConServerUpdate(IntEnum):
+    PLAYERDATA  = 0
+    ADMINCOUNT  = 1
+    MAP         = 2
+
+class RConClientHeaders(IntEnum):
+    BEGINCONNECTION = 52
+    PASSWORD        = 53
+    COMMAND         = 54
+    PONG            = 55
+    DISCONNECT      = 56
+    TABCOMPLETE     = 57
 
 # https://wiki.zandronum.com/Launcher_protocol#Game_modes 
-class ZandronumGamemode(Enum):
-    COOPERATIVE = 0
-    SURVIVAL = 1
-    INVASION = 2
-    DEATHMATCH = 3
-    TEAMPLAY = 4
-    DUEL = 5
-    TERMINATOR = 6
+class ZandronumGamemode(IntEnum):
+    COOPERATIVE     = 0
+    SURVIVAL        = 1
+    INVASION        = 2
+    DEATHMATCH      = 3
+    TEAMPLAY        = 4
+    DUEL            = 5
+    TERMINATOR      = 6
     LASTMANSTANDING = 7
-    TEAMLMS = 8
-    POSSESSION = 9
-    TEAMPOSSESSION = 10
-    TEAMGAME = 11
-    CTF = 12
-    ONEFLAGCTF = 13
-    SKULLTAG = 14
-    DOMINATION = 15
+    TEAMLMS         = 8
+    POSSESSION      = 9
+    TEAMPOSSESSION  = 10
+    TEAMGAME        = 11
+    CTF             = 12
+    ONEFLAGCTF      = 13
+    SKULLTAG        = 14
+    DOMINATION      = 15
 
+@dataclass
 class ZandronumTeam:
     name: str
-    color: tuple[4]
-    score: int
+    color: Tuple[int, int, int, int] = field(default=(255, 255, 255, 255))
+    score: int = 0
 
-    def __init__(self):
-        pass
+    def __post_init__(self):
+        if not all(0 <= c <= 255 for c in self.color):
+            raise ValueError('Each color component must be between 0 and 255')
+        if self.score < 0:
+            raise ValueError('Score cannot be negative')
 
+    def set_color(self, r: int, g: int, b: int, a: int = 255):
+        if not all(0 <= c <= 255 for c in (r, g, b, a)):
+            raise ValueError('Each color component must be between 0 and 255')
+        self.color = (r, g, b, a)
+
+    def __str__(self):
+        return f'Team \"{self.name}\" | Score: {self.score} | Color: {self.color}'
+
+@dataclass
 class ZandronumPlayer:
     name: str
-    frags: int
-    ping: int
-    spectating: bool
-    bot: bool
-    team: int
-    time: int # in minutes
-
-    def __init__(self):
-        pass
+    frags: int = 0
+    ping: int = 0
+    spectating: bool = False
+    bot: bool = False
+    team: int = -1
+    time: int = 0 # in minutes
 
 class ZandronumServer:
     def __init__(self, hostname: str, port: int):
@@ -139,6 +180,9 @@ class ZandronumServer:
         self.teams = []
         self.testing = False
         self.deh = []
+    
+    def __del__(self):
+        self._sock.close()
 
     def _send(self, data: bytes) -> int:
         return self._sock.sendto(Huffman.encode(data), (self._hostname, self._port))
@@ -151,189 +195,211 @@ class ZandronumServer:
         except socket.error as e:
             raise ConnectionError(f'Could not receive data from server. Error: {e}')
 
-        data = ByteReader(Huffman.decode(data))
-
-        if data.remaining() < 4:
-            raise ValueError("Received empty response")
-        
-        status = data.read_long()
-
-        if status == SERVER_LAUNCHER_CHALLENGE:
-            return data
-
-        # UNTESTED CODE
-        if status == SERVER_LAUNCHER_CHALLENGE_SEGMENTED:
-            segments = {}
-
-            while True:
-                seg_number = data.read_byte()
-                seg_total = data.read_byte()
-                offset = data.read_short()
-                size = data.read_short()
-                total = data.read_short()
-
-                segments[seg_number] = data.read_bytes(size)
-
-                if len(segments) == seg_total:
-                    full_data = b''.join(segments[i] for i in sorted(segments))
-                    return ByteReader(full_data)
-
-                data, _ = self._sock.recvfrom(bufsize)
-                data = ByteReader(Huffman.decode(data))
-                status = data.read_long()
-
-                if status != SERVER_LAUNCHER_CHALLENGE_SEGMENTED:
-                    raise ValueError("Unexpected packet")
-        
-        if status == SERVER_LAUNCHER_BANNED:
-            raise ConnectionRefusedError('Server banned you.')
-        
-        if status == SERVER_LAUNCHER_IGNORING:
-            raise ConnectionRefusedError('Server ignoring you.')
-
-        raise ValueError(f'Unexpected server status ({status})! Remaining bytes: {data.remaining()}')
+        return ByteReader(Huffman.decode(data))
 
     def update_info(self, flags: ServerQueryFlags = 0xFFFFFFFF) -> ServerQueryFlags:
         cur_time = int(time.time())
-        request = b''
-        request += struct.pack("<l", 199) # challenge
-        request += struct.pack("<L", flags)
-        request += struct.pack("<l", cur_time)
         
-        try:
-            self._send(request)
+        self._send(struct.pack("<lLl", 199, flags, cur_time))
 
-            res = self._recv(1024 * 8)
+        res = self._recv(1024)
 
-            send_time = res.read_ulong()
+        if res.remaining() < 4:
+            raise ValueError("Received empty response")
+    
+        status = res.read_long()
 
-            self.version = res.read_string()
-            res_flags = res.read_long()
+        # UNTESTED CODE
+        if status == ServerLauncherResponse.CHALLENGE_SEGMENTED:
+            segments = {}
 
-            if res_flags & ServerQueryFlags.NAME:
-                self.name = res.read_string()
-            
-            if res_flags & ServerQueryFlags.URL:
-                self.url = res.read_string()
+            while True:
+                seg_number = res.read_byte()
+                seg_total = res.read_byte()
+                offset = res.read_short()
+                size = res.read_short()
+                total = res.read_short()
 
-            if res_flags & ServerQueryFlags.EMAIL:
-                self.email = res.read_string()
-            
-            if res_flags & ServerQueryFlags.MAPNAME:
-                self.mapname = res.read_string()
-            
-            if res_flags & ServerQueryFlags.MAXCLIENTS:
-                self.maxclients = res.read_byte()
+                segments[seg_number] = res.read_bytes(size)
 
-            if res_flags & ServerQueryFlags.MAXPLAYERS:
-                self.maxplayers = res.read_byte()
-
-            if res_flags & ServerQueryFlags.PWADS:
-                n = res.read_byte()
-                self.pwads.clear()
-
-                for i in range(n):
-                    self.pwads.append(res.read_string())
-            
-            if res_flags & ServerQueryFlags.GAMETYPE:
-                self.gametype = ZandronumGamemode(res.read_byte())
-                self.instagib = res.read_byte()
-                self.buckshot = res.read_byte()
-            
-            if res_flags & ServerQueryFlags.GAMENAME:
-                self.gamename = res.read_string()
-
-            if res_flags & ServerQueryFlags.IWAD:
-                self.iwad = res.read_string()
-
-            if res_flags & ServerQueryFlags.FORCEPASSWORD:
-                self.forcepassword = res.read_byte()
-
-            if res_flags & ServerQueryFlags.FORCEJOINPASSWORD:
-                self.forcejoinpassword = res.read_byte()
-
-            if res_flags & ServerQueryFlags.GAMESKILL:
-                self.skill = res.read_byte()
-
-            if res_flags & ServerQueryFlags.BOTSKILL:
-                self.skill = res.read_byte()
-
-            if res_flags & ServerQueryFlags.DMFLAGS:
-                self.dmflags = res.read_long()
-                self.dmflags2 = res.read_long()
-                self.compatflags = res.read_long()
-            
-            if res_flags & ServerQueryFlags.LIMITS:
-                self.fraglimit = res.read_short()
-                self.timelimit = res.read_short()
+                if len(segments) == seg_total:
+                    res = b''.join(segments[i] for i in sorted(segments))
                 
-                if self.timelimit > 0:
-                    self.timeleft = res.read_short()
+                res, _ = self._sock.recvfrom(1024)
+                res = ByteReader(Huffman.decode(res))
+                status = res.read_long()
 
-                self.duellimit = res.read_short()
-                self.pointlimit = res.read_short()
-                self.winlimit = res.read_short()
+                if status != ServerLauncherResponse.CHALLENGE_SEGMENTED:
+                    raise ValueError("Unexpected packet")
+        
+        if status == ServerLauncherResponse.BANNED:
+            raise ConnectionRefusedError('Server banned you.')
+    
+        if status == ServerLauncherResponse.IGNORING:
+            raise ConnectionRefusedError('Server ignoring you.')
 
-            if res_flags & ServerQueryFlags.TEAMDAMAGE:
-                self.teamdamage = res.read_float()
+        send_time = res.read_ulong()
 
-            if res_flags & ServerQueryFlags.TEAMSCORES:
-                res.read_short()
-                res.read_short()
+        self.version = res.read_string()
+        res_flags = res.read_long()
 
-            if res_flags & ServerQueryFlags.NUMPLAYERS:
-                self.numplayers = res.read_byte()
+        if res_flags & ServerQueryFlags.NAME:
+            self.name = res.read_string()
+        
+        if res_flags & ServerQueryFlags.URL:
+            self.url = res.read_string()
 
-            if res_flags & ServerQueryFlags.PLAYERDATA:
-                self.players.clear()
+        if res_flags & ServerQueryFlags.EMAIL:
+            self.email = res.read_string()
+        
+        if res_flags & ServerQueryFlags.MAPNAME:
+            self.mapname = res.read_string()
+        
+        if res_flags & ServerQueryFlags.MAXCLIENTS:
+            self.maxclients = res.read_byte()
 
-                for i in range(self.numplayers):
-                    player = ZandronumPlayer()
-                    player.name = res.read_string()
-                    player.frags = res.read_short()
-                    player.ping = res.read_short()
-                    player.spectating = res.read_byte()
-                    player.bot = res.read_byte()
-                    player.team = res.read_byte()
-                    player.time = res.read_byte()
+        if res_flags & ServerQueryFlags.MAXPLAYERS:
+            self.maxplayers = res.read_byte()
 
-                    self.players.append(player)
+        if res_flags & ServerQueryFlags.PWADS:
+            n = res.read_byte()
+            self.pwads.clear()
+
+            for i in range(n):
+                self.pwads.append(res.read_string())
+        
+        if res_flags & ServerQueryFlags.GAMETYPE:
+            self.gametype = ZandronumGamemode(res.read_byte())
+            self.instagib = res.read_byte()
+            self.buckshot = res.read_byte()
+        
+        if res_flags & ServerQueryFlags.GAMENAME:
+            self.gamename = res.read_string()
+
+        if res_flags & ServerQueryFlags.IWAD:
+            self.iwad = res.read_string()
+
+        if res_flags & ServerQueryFlags.FORCEPASSWORD:
+            self.forcepassword = res.read_byte()
+
+        if res_flags & ServerQueryFlags.FORCEJOINPASSWORD:
+            self.forcejoinpassword = res.read_byte()
+
+        if res_flags & ServerQueryFlags.GAMESKILL:
+            self.skill = res.read_byte()
+
+        if res_flags & ServerQueryFlags.BOTSKILL:
+            self.skill = res.read_byte()
+
+        if res_flags & ServerQueryFlags.DMFLAGS:
+            self.dmflags = res.read_long()
+            self.dmflags2 = res.read_long()
+            self.compatflags = res.read_long()
+        
+        if res_flags & ServerQueryFlags.LIMITS:
+            self.fraglimit = res.read_short()
+            self.timelimit = res.read_short()
             
-            if res_flags & ServerQueryFlags.TEAMINFO_NUMBER:
-                self.numteams = res.read_byte()
+            if self.timelimit > 0:
+                self.timeleft = res.read_short()
 
-            if res_flags & ServerQueryFlags.TEAMINFO_NAME:
-                for i in range(self.numteams):
-                    self.teams[i].name = res.read_string()
+            self.duellimit = res.read_short()
+            self.pointlimit = res.read_short()
+            self.winlimit = res.read_short()
 
-            if res_flags & ServerQueryFlags.TEAMINFO_COLOR:
-                for i in range(self.numteams):
-                    self.teams[i].color = struct.unpack("<BBBB", res.read_long())
+        if res_flags & ServerQueryFlags.TEAMDAMAGE:
+            self.teamdamage = res.read_float()
+
+        if res_flags & ServerQueryFlags.TEAMSCORES:
+            res.read_short()
+            res.read_short()
+
+        if res_flags & ServerQueryFlags.NUMPLAYERS:
+            self.numplayers = res.read_byte()
+
+        if res_flags & ServerQueryFlags.PLAYERDATA:
+            self.players.clear()
+
+            for i in range(self.numplayers):
+                player = ZandronumPlayer()
+                player.name = res.read_string()
+                player.frags = res.read_short()
+                player.ping = res.read_short()
+                player.spectating = res.read_byte()
+                player.bot = res.read_byte()
+                player.team = res.read_byte()
+                player.time = res.read_byte()
+
+                self.players.append(player)
+        
+        if res_flags & ServerQueryFlags.TEAMINFO_NUMBER:
+            self.numteams = res.read_byte()
+
+        if res_flags & ServerQueryFlags.TEAMINFO_NAME:
+            for i in range(self.numteams):
+                self.teams[i].name = res.read_string()
+
+        if res_flags & ServerQueryFlags.TEAMINFO_COLOR:
+            for i in range(self.numteams):
+                self.teams[i].color = struct.unpack("<BBBB", res.read_long())
+        
+        if res_flags & ServerQueryFlags.TEAMINFO_NAME:
+            for i in range(self.numteams):
+                self.teams[i].name = res.read_short()
+
+        if res_flags & ServerQueryFlags.TESTING_SERVER:
+            self.testing = res.read_byte()
+            res.read_string()
+
+        if res_flags & ServerQueryFlags.ALL_DMFLAGS:
+            n = res.read_byte()
+
+            if n > 0:
+                self.dmflags = res.read_long()
+            if n > 1:
+                self.dmflags2 = res.read_long()
+            if n > 3:
+                self.zadmflags = res.read_long()
+            if n > 4:
+                self.compatflags = res.read_long()
+            if n > 5:
+                self.zacompatflags = res.read_long()
+            if n > 6:
+                self.compatflags2 = res.read_long()
+
+        return res_flags
+
+    def login_rcon(self, password: str):
+        self._send(struct.pack('<BB', RConClientHeaders.BEGINCONNECTION, RCON_PROTOCOL_VERSION))
+
+        res = self._recv(64)
+        status = res.read_byte()
+
+        if status == RConServerHeaders.BANNED:
+            raise ConnectionRefusedError('You\'re banned by this server!')
             
-            if res_flags & ServerQueryFlags.TEAMINFO_NAME:
-                for i in range(self.numteams):
-                    self.teams[i].name = res.read_short()
+        if status == RConServerHeaders.OLDPROTOCOL:
+            serverproto = res.read_byte()
+            serverversion = res.read_string()
 
-            if res_flags & ServerQueryFlags.TESTING_SERVER:
-                self.testing = res.read_byte()
-                res.read_string()
+            raise ConnectionRefusedError(
+                f'Protocol version ({RCON_PROTOCOL_VERSION}) is too old!',
+                f'Server protocol: {serverproto}. Server version: {serverversion}.'
+            )
 
-            if res_flags & ServerQueryFlags.ALL_DMFLAGS:
-                n = res.read_byte()
+        if status != RConServerHeaders.SALT:
+            raise ValueError('Unexpected RCon packet!')
 
-                if n > 0:
-                    self.dmflags = res.read_long()
-                if n > 1:
-                    self.dmflags2 = res.read_long()
-                if n > 3:
-                    self.zadmflags = res.read_long()
-                if n > 4:
-                    self.compatflags = res.read_long()
-                if n > 5:
-                    self.zacompatflags = res.read_long()
-                if n > 6:
-                    self.compatflags2 = res.read_long()
+        salt = res.read_bytes(32)
+        hash = hashlib.md5(salt + password.encode()).hexdigest()
 
-            return res_flags
-        except Exception as e:
-            print(f'Error has occured while updating doom server: {e}')
+        self._send(struct.pack('<B', RConClientHeaders.PASSWORD) + hash.encode())
+        res = self._recv(256)
+
+        status = res.read_byte()
+
+        if status == RConServerHeaders.INVALIDPASSWORD:
+            raise ConnectionRefusedError('Invalid RCon password!')
+
+        if status != RConServerHeaders.LOGGEDIN:
+            raise ValueError('Unexpected RCon packet!')

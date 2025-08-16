@@ -1,0 +1,13 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Tests",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
