@@ -3,7 +3,7 @@ from discord import *
 from discord.ext import tasks
 from dotenv import load_dotenv
 from zandronumserver import ZandronumServer, RConServerUpdate
-
+import asyncio
 load_dotenv()
 
 # Bot settings
@@ -45,17 +45,14 @@ async def on_ready():
     load_config()
 
     await tree.sync(guild=guild)
-    update_info.start()
-
-    DOOMSERVER.start_rcon(os.getenv('RCON_PASSWORD'))
+    print('guild passed')
+    if DOOMSERVER.start_rcon(os.getenv('RCON_PASSWORD')):
+        DOOMSERVER.update_info()
 
     print('Bot started')
 
 @tasks.loop(seconds=10)
 async def update_info():
-    if DOOMSERVER.update_info():
-        await client.change_presence(activity=discord.Game(name=f'{DOOMSERVER.name} with {DOOMSERVER.numplayers} online'))
-    
     channel_id = CONFIG['info-channel-id']
 
     if not channel_id:
@@ -98,10 +95,15 @@ def generate_info_embed():
 
 @DOOMSERVER.message
 async def on_message(msg: str):
+    # TODO: Sort messages
     print(msg)
+    channel = client.get_channel(1405159978892787732)
+
+    await channel.send(msg)
 
 @DOOMSERVER.update
 async def update(update: RConServerUpdate, value):
+    await update_info()
     match update:
         case RConServerUpdate.PLAYERDATA:
             print('Updated player data!')
@@ -115,4 +117,4 @@ async def update(update: RConServerUpdate, value):
 
 
 if __name__ == '__main__':
-    client.run(token=TOKEN)
+    asyncio.run(client.start(token=TOKEN))
