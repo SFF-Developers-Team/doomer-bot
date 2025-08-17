@@ -2,7 +2,7 @@ import os, json, discord, datetime
 from discord import *
 from discord.ext import tasks
 from dotenv import load_dotenv
-from zandronumserver import ZandronumServer
+from zandronumserver import ZandronumServer, RConServerUpdate
 
 load_dotenv()
 
@@ -46,6 +46,9 @@ async def on_ready():
 
     await tree.sync(guild=guild)
     update_info.start()
+
+    DOOMSERVER.start_rcon(os.getenv('RCON_PASSWORD'))
+
     print('Bot started')
 
 @tasks.loop(seconds=10)
@@ -92,6 +95,24 @@ def generate_info_embed():
     embed.set_footer(text=f'Zandronum {DOOMSERVER.version}')
 
     return embed
+
+@DOOMSERVER.message
+async def on_message(msg: str):
+    print(msg)
+
+@DOOMSERVER.update
+async def update(update: RConServerUpdate, value):
+    match update:
+        case RConServerUpdate.PLAYERDATA:
+            print('Updated player data!')
+            print(', '.join(value))
+        
+        case RConServerUpdate.ADMINCOUNT:
+            print(f'New admin has connected! Admins: {value}')
+
+        case RConServerUpdate.MAP:
+            print(f'Map changed to {value}')
+
 
 if __name__ == '__main__':
     client.run(token=TOKEN)

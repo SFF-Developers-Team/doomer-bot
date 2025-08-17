@@ -2,12 +2,12 @@ import time
 import socket
 import struct
 import hashlib
+import asyncio
 from enum import IntEnum, IntFlag
 from huffman import Huffman
 from bytereader import ByteReader
 from dataclasses import dataclass, field
 from typing import Tuple
-
 
 RCON_PROTOCOL_VERSION = 4
 
@@ -143,6 +143,11 @@ class ZandronumServer:
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         
+        self._handlers = {
+            'message': [],
+            'update': [],
+        }
+
         # Initialize all attributes
         self.version = ''
         self.name = ''
@@ -370,37 +375,111 @@ class ZandronumServer:
 
         return res_flags
 
-    def login_rcon(self, password: str):
-        self._send(struct.pack('<BB', RConClientHeaders.BEGINCONNECTION, RCON_PROTOCOL_VERSION))
+    def message(self, func):
+        self.add_listener('message', func)
+        return func
+    
+    def update(self, func):
+        self.add_listener('update', func)
+        return func
+    
+    def add_listener(self, type, func):
+        if type not in self._handlers:
+            return
 
-        res = self._recv(64)
-        status = res.read_byte()
+        if func not in self._handlers[type]:
+            self._handlers[type].append(func) 
 
-        if status == RConServerHeaders.BANNED:
-            raise ConnectionRefusedError('You\'re banned by this server!')
-            
-        if status == RConServerHeaders.OLDPROTOCOL:
-            serverproto = res.read_byte()
-            serverversion = res.read_string()
+    def remove_listener(self, type, func):
+        if type not in self._handlers:
+            return
 
-            raise ConnectionRefusedError(
-                f'Protocol version ({RCON_PROTOCOL_VERSION}) is too old!',
-                f'Server protocol: {serverproto}. Server version: {serverversion}.'
-            )
+        if func in self._handlers[type]:
+            self._handlers[type].remove(func) 
+    
+    async def _trigger(self, type, *args, **kwargs):
+        if type not in self._handlers:
+            return
+        
+        for handler in self._handlers[type]:
+            if asyncio.iscoroutinefunction(handler):
+                await handler(*args, **kwargs)
+            else:
+                handler(*args, **kwargs)
 
-        if status != RConServerHeaders.SALT:
-            raise ValueError('Unexpected RCon packet!')
+    async def _rcon_runner(self, password: str):
+        self.disconnect_rcon()
+        self._send(struct.pack('<bb', RConClientHeaders.BEGINCONNECTION, RCON_PROTOCOL_VERSION))
+        print('Sent begin connection packet')
 
-        salt = res.read_bytes(32)
-        hash = hashlib.md5(salt + password.encode()).hexdigest()
+        while True:
+            try:
+                res = self._recv(1024)
+                status = res.read_byte()
 
-        self._send(struct.pack('<B', RConClientHeaders.PASSWORD) + hash.encode())
-        res = self._recv(256)
+                print(f'Received packet {status}')
 
-        status = res.read_byte()
+                match status:
+                    case RConServerHeaders.BANNED:
+                        raise ConnectionRefusedError('You\'re banned by this server!')
 
-        if status == RConServerHeaders.INVALIDPASSWORD:
-            raise ConnectionRefusedError('Invalid RCon password!')
+                    case RConServerHeaders.OLDPROTOCOL:
+                        protocol = res.read_byte()
+                        version = res.read_string()
 
-        if status != RConServerHeaders.LOGGEDIN:
-            raise ValueError('Unexpected RCon packet!')
+                        raise ConnectionRefusedError(
+                            f'Protocol version ({RCON_PROTOCOL_VERSION}) is too old!',
+                            f'Server protocol: {protocol}. Server version: {version}.'
+                        )
+                    
+                    case RConServerHeaders.SALT:
+                        salt = res.read_bytes(32)
+                        hash = hashlib.md5(salt + password.encode()).hexdigest()
+
+                        self._send(struct.pack('<b', RConClientHeaders.PASSWORD) + hash.encode())
+
+                        print('Sent password to server')
+
+                    case RConServerHeaders.LOGGEDIN:
+                        protocol = res.read_byte()
+                        hostname = res.read_string()
+                        print(f'Logged in {hostname}! Server protocol: {protocol}')
+                    
+                    case RConServerHeaders.INVALIDPASSWORD:
+                        raise ConnectionRefusedError('Invalid RCon password!')
+
+                    case RConServerHeaders.MESSAGE:
+                        msg = res.read_string()
+                        await self._trigger('message', msg)
+                    
+                    case RConServerHeaders.UPDATE:
+                        update = res.read_byte()
+                        value = []
+
+                        match update:
+                            case RConServerUpdate.PLAYERDATA:
+                                n = res.read_byte()
+
+                                for i in range(n):
+                                    value.append(res.read_string())
+
+                            case RConServerUpdate.ADMINCOUNT:
+                                value = res.read_byte()
+                        
+                            case RConServerUpdate.MAP:
+                                value = res.read_string()
+
+                        await self._trigger('update', RConServerUpdate(update), value)
+
+
+
+            except socket.timeout:
+                    self._send(struct.pack('<b', RConClientHeaders.PONG))
+            except Exception as e:
+                raise e
+
+    def start_rcon(self, password: str):
+        asyncio.create_task(self._rcon_runner(password))
+
+    def disconnect_rcon(self):
+        self._send(struct.pack('<b', RConClientHeaders.DISCONNECT))
