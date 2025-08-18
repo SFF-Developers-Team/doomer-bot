@@ -8,7 +8,6 @@ import huffman
 from bytereader import ByteReader
 from dataclasses import dataclass, field
 from typing import Tuple
-h = huffman.HuffmanObject(huffman.SKULLTAG_FREQS)
 
 RCON_PROTOCOL_VERSION = 4
 
@@ -149,6 +148,8 @@ class ZandronumServer:
             'update': [],
         }
 
+        self._huffman = huffman.HuffmanObject(huffman.SKULLTAG_FREQS)
+
         # Initialize all attributes
         self.version = ''
         self.name = ''
@@ -191,7 +192,7 @@ class ZandronumServer:
         self._sock.close()
 
     def _send(self, data: bytes) -> int:
-        return self._sock.sendto(h.encode(data), (self._hostname, self._port))
+        return self._sock.sendto(self._huffman.encode(data), (self._hostname, self._port))
 
     def _recv(self, bufsize: int) -> ByteReader:
         try:
@@ -201,7 +202,7 @@ class ZandronumServer:
         except socket.error as e:
             raise ConnectionError(f'Could not receive data from server. Error: {e}')
 
-        return ByteReader(h.decode(data))
+        return ByteReader(self._huffman.decode(data))
 
     def update_info(self, flags: ServerQueryFlags = 0xFFFFFFFF) -> ServerQueryFlags:
         cur_time = int(time.time())
@@ -233,7 +234,7 @@ class ZandronumServer:
                     break
                 
                 res, _ = self._sock.recvfrom(1024)
-                res = ByteReader(h.decode(res))
+                res = ByteReader(self._huffman.decode(res))
                 status = res.read_long()
 
                 if status != ServerLauncherResponse.CHALLENGE_SEGMENTED:
@@ -328,8 +329,8 @@ class ZandronumServer:
             self.players.clear()
 
             for i in range(self.numplayers):
-                player = ZandronumPlayer()
-                player.name = res.read_string()
+                player = ZandronumPlayer(name=res.read_string())
+
                 player.frags = res.read_short()
                 player.ping = res.read_short()
                 player.spectating = res.read_byte()
@@ -415,7 +416,7 @@ class ZandronumServer:
 
         while True:
             try:
-                res = self._recv(4096)
+                res = await asyncio.to_thread(self._recv, 4096)
                 status = res.read_byte()
 
                 print(f'Received packet {status}')
@@ -459,22 +460,18 @@ class ZandronumServer:
 
                         match update:
                             case RConServerUpdate.PLAYERDATA:
-                                n = res.read_byte()
-                                self.numplayers = n
-                                for i in range(n):
+                                self.numplayers = res.read_byte()
+                                
+                                for i in range(self.numplayers):
                                     value.append(res.read_string())
 
                             case RConServerUpdate.ADMINCOUNT:
                                 value = res.read_byte()
                                 
                             case RConServerUpdate.MAP:
-                                value = res.read_string()
-                                self.mapname = value
+                                self.mapname, value = res.read_string()
                                 
                         await self._trigger('update', RConServerUpdate(update), value)
-
-
-
             except socket.timeout:
                     self._send(struct.pack('<b', RConClientHeaders.PONG))
             except Exception as e:
@@ -483,12 +480,16 @@ class ZandronumServer:
     def start_rcon(self, password: str):
         asyncio.create_task(self._rcon_runner(password))
 
+    def run_rcon(self, password: str):
+        asyncio.run(self._rcon_runner(password))
+
     def disconnect_rcon(self):
         self._send(struct.pack('<b', RConClientHeaders.DISCONNECT))
-    # Check commands here https://wiki.zandronum.com/Console_commands
-    async def send_command_rcon(self, command: str):
-        packetmsg = b''
-        packetmsg += struct.pack('<B', RConClientHeaders.COMMAND)
-        packetmsg += struct.pack('<s', command.encode())
-        
+
+    def send_command_rcon(self, command: str):
+        """Check commands here https://wiki.zandronum.com/Console_commands"""
+        packetmsg = struct.pack('<b', RConClientHeaders.COMMAND) + command.encode()
         self._send(packetmsg)
+
+    def get_player(self, username: str):
+        return next((p for p in self.players if p.name == username), None)
