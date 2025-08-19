@@ -469,7 +469,7 @@ class ZandronumServer:
                                 value = res.read_byte()
                                 
                             case RConServerUpdate.MAP:
-                                self.mapname, value = res.read_string()
+                                self.mapname = value = res.read_string()
                                 
                         await self._trigger('update', RConServerUpdate(update), value)
             except socket.timeout:

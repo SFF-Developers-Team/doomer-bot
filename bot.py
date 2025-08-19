@@ -99,28 +99,55 @@ def generate_info_embed():
 
     return embed
 
-player_msg_re = re.compile(r"^(?!->)\s*([A-Za-z0-9_]+): (.+)$")
+player_msg_re = re.compile(r'^(.*?)\:\s(.+)$')
+system_msg_re = re.compile(r'^(->|.+\(RCON by .+\))')
+ip_re = re.compile(r'\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b')
+connect_re = re.compile(r"^(?P<name>.+?) \([^)]*\) has connected\.$")
+disconnect_re = re.compile(r"^client (?P<name>.+?) \([^)]*\) disconnected\.$")
+
+def clean_nick(nick: str) -> str:
+    return re.sub(r'\x1c\[[^\]]*\]|\x1c-', '', nick)
 
 @DOOMSERVER.message
 async def on_message(msg: str):
+    if chat_webhook is None:
+        return
+
     print(f'Processing RCon message: {msg}')
 
-    match = player_msg_re.match(msg)
+    m = connect_re.match(msg)
+    if m:
+        chat_webhook.send(content=f'**{clean_nick(m.group('name'))}** has connected', username='Server')
 
-    if chat_webhook is not None and match:
-        nick, message = match.groups()
+    m = disconnect_re.match(msg)
+    if m:
+        chat_webhook.send(content=f'**{clean_nick(m.group('name'))}** has disconnected', username='Server')
+    
+    RCON_KEYS = (
+        "Name:", "Team:", "Skin:", "Gender:", "PlayerClass:", "Account:",
+        "ColorSet:", "SwitchOnPickup:", "MoveBob:", "StillBob:",
+        "Wi_NoAutostartMap:", "RailColor:", "Handicap:", "CL_TicsPerUpdate:",
+        "CL_ConnectionType:", "CL_ClientFlags:", "Voice_Enable:",
+        "Voice_ListenFilter:", "Voice_TransmitFilter:", "Autoaim:", "Color:",
+        "Connect"
+    )
+
+    if ip_re.search(msg) or msg.strip().startswith(RCON_KEYS):
+        return
+    
+    playermsg = player_msg_re.match(msg)
+    systemmsg = system_msg_re.match(msg)
+
+    if playermsg and not systemmsg:
+        nick, message = playermsg.groups()
 
         if nick != '<Server>':
-            chat_webhook.send(content=message, username=nick)
+            chat_webhook.send(content=message, username=clean_nick(nick))
 
 @bot_client.event
 async def on_message(message: discord.Message):
-    if message.channel.id != int(os.getenv('CHAT_CHANNEL_ID')) or message.author.bot:
-        return 
-    
-    print(f'{message.author}: {message.content}')
-
-    DOOMSERVER.send_command_rcon(f'SAY "{message.author.name}: {message.content}"')
+    if message.channel.id == int(os.getenv('CHAT_CHANNEL_ID')) and not message.author.bot:    
+        DOOMSERVER.send_command_rcon(f'SAY "\\c[J1]{message.author.name}: \\c[C2]{message.content}"')
 
 
 @DOOMSERVER.update
