@@ -2,9 +2,9 @@
 
 **Features**:
 
-Chat bridge between Discord and DOOM server
+* Real-time server monitoring
 
-Info about server in channel
+* Chat bridge between Discord community and Zandronum server
 
 **TODO List**:
 
