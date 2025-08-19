@@ -56,37 +56,7 @@ async def on_ready():
         DOOMSERVER.update_info()
     
     print('Bot started')
-
-@tasks.loop(seconds=10)
-async def update_info():
-    channel_id = CONFIG['info-channel-id']
-
-    if not channel_id:
-        return
     
-    channel = bot_client.get_channel(channel_id)
-
-    message_id = CONFIG['info-message-id']
-
-    if message_id:
-        try:
-            message = await channel.fetch_message(message_id)
-            await message.edit(embed=generate_info_embed())
-
-            return
-        except discord.NotFound:
-            pass
-
-    msg = await channel.send(embed=generate_info_embed())    
-    await bot_client.change_presence(activity=discord.Game(name=f'{DOOMSERVER.name} with {DOOMSERVER.numplayers} online'))
-
-    CONFIG['info-message-id'] = msg.id
-    save_config()
-
-@tree.command(name = 'ping', description = 'Just for test', guild=bot_guild)
-async def ping(ctx):
-    await ctx.response.send_message("Pong!")
-        
 def generate_info_embed():
     embed = discord.Embed(title=f'{DOOMSERVER.name} ({SERVER_IP}:{SERVER_PORT})', colour=discord.Colour.brand_red(), timestamp=datetime.datetime.now())
     embed.add_field(name=f'Players', value=f'{DOOMSERVER.numplayers}/{DOOMSERVER.maxplayers}')
@@ -98,6 +68,38 @@ def generate_info_embed():
     embed.set_footer(text=f'Zandronum {DOOMSERVER.version}')
 
     return embed
+
+async def update_info():
+    await bot_client.change_presence(activity=discord.Game(name=f'{DOOMSERVER.name} with {DOOMSERVER.numplayers} online'))
+
+    channel_id = CONFIG['info-channel-id']
+
+    if not channel_id:
+        return
+    
+    channel = bot_client.get_channel(channel_id)
+
+    message_id = CONFIG['info-message-id']
+
+    embed = generate_info_embed()
+
+    if message_id:
+        try:
+            message = await channel.fetch_message(message_id)
+            await message.edit(embed=embed)
+
+            return
+        except discord.NotFound:
+            pass
+
+    msg = await channel.send(embed=embed)    
+
+    CONFIG['info-message-id'] = msg.id
+    save_config()
+
+@tree.command(name = 'ping', description = 'Just for test', guild=bot_guild)
+async def ping(ctx):
+    await ctx.response.send_message("Pong!")
 
 player_msg_re = re.compile(r'^(.*?)\:\s(.+)$')
 system_msg_re = re.compile(r'^(->|.+\(RCON by .+\))')
@@ -148,7 +150,6 @@ async def on_message(msg: str):
 async def on_message(message: discord.Message):
     if message.channel.id == int(os.getenv('CHAT_CHANNEL_ID')) and not message.author.bot:    
         DOOMSERVER.send_command_rcon(f'SAY "\\c[J1]{message.author.name}: \\c[C2]{message.content}"')
-
 
 @DOOMSERVER.update
 async def update(update: RConServerUpdate, value):
