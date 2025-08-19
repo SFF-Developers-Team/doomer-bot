@@ -2,9 +2,9 @@
 
 **Features**:
 
-* Real-time server monitoring
+* **Real-time server monitoring**
 
-* Chat bridge between Discord community and Zandronum server
+* **Chat bridge between Discord community and Zandronum server**
 
 **TODO List**:
 
