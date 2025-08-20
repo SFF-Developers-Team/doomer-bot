@@ -475,7 +475,7 @@ class ZandronumServer:
             except socket.timeout:
                     self._send(struct.pack('<b', RConClientHeaders.PONG))
             except Exception as e:
-                raise e
+                print(f'Error: {e}')
 
     def start_rcon(self, password: str):
         asyncio.create_task(self._rcon_runner(password))
