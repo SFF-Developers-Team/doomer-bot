@@ -144,7 +144,7 @@ async def on_message(msg: str):
         nick, message = playermsg.groups()
 
         if nick != '<Server>':
-            chat_webhook.send(content=message, username=clean_nick(nick))
+            chat_webhook.send(content=message, username=clean_nick(nick), avatar_url="https://sffempire.ru/bot/playeravatar.png")
 
 @bot_client.event
 async def on_message(message: discord.Message):
@@ -163,7 +163,8 @@ async def update(update: RConServerUpdate, value):
 
         case RConServerUpdate.MAP:
             print(f'Map changed to {value}')
-    
+            chat_webhook.send(content=f'Map changed to **{value}**', username='Server')
+
     await update_info()
 
 

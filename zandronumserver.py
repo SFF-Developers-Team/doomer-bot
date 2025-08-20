@@ -376,7 +376,7 @@ class ZandronumServer:
                 self.compatflags2 = res.read_long()
 
         return res_flags
-
+    
     def message(self, func):
         self.add_listener('message', func)
         return func
